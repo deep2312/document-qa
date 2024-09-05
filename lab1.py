@@ -2,6 +2,7 @@ import streamlit as st
 from openai import OpenAI
 
 def lab1():
+
     # Show title and description.
     st.title("📄 Deep's question answering Chatbot")
     st.write(
