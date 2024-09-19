@@ -4,7 +4,7 @@ import tiktoken  # Token counting
 
 def lab3():
     # Show title and description.
-    st.title("🧠 Simple Chatbot for Kids")
+    st.title("Simple Chatbot by Deep")
 
     # Sidebar: Add a menu for the type of summary
     st.sidebar.title("Summary Options")
@@ -33,6 +33,7 @@ def lab3():
     if 'messages' not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "Hi! How can I help you today?"}]
         st.session_state["awaiting_info_reply"] = False  # Tracks whether bot is awaiting a yes/no reply
+        st.session_state["last_question"] = None  # Stores the last user question
 
     # Define a function to calculate the token count using the tiktoken library
     def count_tokens(messages):
@@ -64,35 +65,40 @@ def lab3():
         if st.session_state["awaiting_info_reply"]:
             # Handle the yes/no response for more info
             if prompt.lower() == 'yes':
-                # Provide more information
-                last_assistant_message = [msg["content"] for msg in st.session_state.messages if msg["role"] == "assistant"][-1]
+                # Retrieve the last question to generate more information
+                last_question = st.session_state["last_question"]
+                if last_question:
+                    # Send the same question but request "more info"
+                    question = f"Can you provide more details about: {last_question}"
+                    additional_info_prompt = f"{question}. Explain in extremely simple terms such that even a 10 year old can understand."
+                    st.session_state.messages.append({"role": "user", "content": additional_info_prompt})
 
-                # Ask for more information from OpenAI API
-                st.session_state.messages.append({"role": "user", "content": "Can you give me more details?"})
-                
-                client = st.session_state.client
-                response = client.chat.completions.create(
-                    model=model_to_use,
-                    messages=[
-                        {"role": "system", "content": "Expand on this in a way a 10-year-old would understand."},
-                        {"role": "assistant", "content": last_assistant_message}
-                    ]
-                )
+                    with st.chat_message("user"):
+                        st.markdown(question)
 
-                # Extract and display the more detailed information
-                detailed_reply = response.choices[0].message.content
-                st.session_state.messages.append({"role": "assistant", "content": detailed_reply})
+                    # Call OpenAI API to get the detailed answer
+                    client = st.session_state.client
+                    response = client.chat.completions.create(
+                        model=model_to_use,
+                        messages=st.session_state.messages
+                    )
 
-                with st.chat_message("assistant"):
-                    st.markdown(detailed_reply)
+                    # Extract the response content properly
+                    reply_content = response.choices[0].message.content
 
-                # Ask if they want more info again
-                follow_up = "DO YOU WANT MORE INFO?"
-                st.session_state.messages.append({"role": "assistant", "content": follow_up})
-                st.session_state["awaiting_info_reply"] = True
+                    # Display assistant response in chat message container
+                    st.session_state.messages.append({"role": "assistant", "content": reply_content})
 
-                with st.chat_message("assistant"):
-                    st.markdown(follow_up)
+                    with st.chat_message("assistant"):
+                        st.markdown(reply_content)
+
+                    # Ask if they want more info again
+                    follow_up = "DO YOU WANT MORE INFO?"
+                    st.session_state.messages.append({"role": "assistant", "content": follow_up})
+                    st.session_state["awaiting_info_reply"] = True
+
+                    with st.chat_message("assistant"):
+                        st.markdown(follow_up)
 
             elif prompt.lower() == 'no':
                 # Reset and ask for a new question
@@ -112,13 +118,14 @@ def lab3():
         
         else:
             # Normal question flow
-            st.session_state.messages.append({"role": "user", "content": prompt})
+            simplify = f"explain in simple terms"
+            st.session_state.messages.append({"role": "user", "content": f"{prompt} Use simple, easy to understand and non technical terms to explain."})
 
             with st.chat_message("user"):
                 st.markdown(prompt)
 
             # Define your max tokens limit
-            max_tokens = 1024  # For example, set it to 1024 tokens
+            max_tokens = 512  # For example, set it to 512 tokens
 
             # Update conversation buffer to fit within max_tokens
             update_conversation_buffer(max_tokens)
@@ -138,6 +145,9 @@ def lab3():
 
             with st.chat_message("assistant"):
                 st.markdown(reply_content)
+
+            # Store the last user question for follow-up in case they ask for more info
+            st.session_state["last_question"] = prompt
 
             # Ask if they want more info
             follow_up = "DO YOU WANT MORE INFO?"
