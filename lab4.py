@@ -5,6 +5,9 @@ import chromadb
 import pdfplumber  # For reading PDFs
 from chromadb.utils import embedding_functions
 
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 def lab3():
     # Show title and description.
@@ -58,6 +61,48 @@ def lab3():
             current_tokens = count_tokens(full_history)
 
         st.session_state.messages = full_history  # Update the messages with the trimmed version
+
+    def convert_pdf_to_text(pdf_file):
+        text = ""
+        with pdfplumber.open(pdf_file) as pdf:
+            for page in pdf.pages:
+                text += page.extract_text()
+        return text
+    
+    def initialize_chromadb(pdf_files):
+        if 'Lab4_vectorDB' not in st.session_state:
+            # Initialize ChromaDB and OpenAI embedding function
+            chroma_client = chromadb.Client()
+            embedding_func = embedding_functions.OpenAIEmbeddingFunction(api_key=st.secrets["my_api_key"],
+                                                                         model_name="text-embedding-ada-002")
+            
+            # Use pysqlite3 in ChromaDB
+            collection = chroma_client.create_collection(name="Lab4Collection", embedding_function=embedding_func, client_settings={"sqlite3": sqlite3})
+            
+            # Process PDF files
+            for pdf_file in pdf_files:
+                text = convert_pdf_to_text(pdf_file)
+                metadata = {"filename": pdf_file.name}
+                
+                # Add document to ChromaDB collection with embedding
+                collection.add(
+                    documents=[text],
+                    metadatas=[metadata],
+                    ids=[pdf_file.name]  # Using filename as ID
+                )
+                
+            # Store collection in session state to avoid re-creation
+            st.session_state.Lab4_vectorDB = collection
+    # Initialize ChromaDB once if it hasn't been created yet
+    if 'Lab4_vectorDB' not in st.session_state:
+        # Assume 'uploaded_files' is a list of 7 uploaded PDF files
+        uploaded_files = st.sidebar.file_uploader("Upload PDF files", accept_multiple_files=True, type=["pdf"])
+
+        if len(uploaded_files) == 7:
+            st.sidebar.write("Creating ChromaDB with the uploaded PDFs...")
+            initialize_chromadb(uploaded_files)
+        else:
+            st.sidebar.warning("Please upload exactly 7 PDF files to proceed.")
 
     # Display all the messages in the chat history
     for message in st.session_state.messages:
