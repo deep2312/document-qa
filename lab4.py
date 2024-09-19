@@ -1,35 +1,21 @@
 import streamlit as st
 from openai import OpenAI
 import tiktoken  # Token counting
-import chromadb
 import pdfplumber  # For reading PDFs
-from chromadb.utils import embedding_functions
 
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
-def lab3():
+import chromadb
+from chromadb.utils import embedding_functions
+
+def lab4():
     # Show title and description.
     st.title("Simple Chatbot by Deep")
 
-    # Sidebar: Add a menu for the type of summary
-    st.sidebar.title("Summary Options")
-    summary_type = st.sidebar.selectbox(
-        "Choose the type of summary:",
-        ["Summarize the content in 100 words",
-         "Summarize the content in 2 connecting paragraphs",
-         "Summarize the content in 5 bullet points"
-         ]
-    )
+    model_to_use = 'gpt-4o-mini'
 
-    OpenAI_model = st.sidebar.selectbox('Which Model?',
-                                        ('mini', 'regular'))
-    
-    if OpenAI_model == 'mini':
-        model_to_use = 'gpt-4o-mini'
-    else:
-        model_to_use = 'gpt-4o'
 
     # Initialize the OpenAI client if it doesn't exist
     if 'client' not in st.session_state:
@@ -77,7 +63,7 @@ def lab3():
                                                                          model_name="text-embedding-ada-002")
             
             # Use pysqlite3 in ChromaDB
-            collection = chroma_client.create_collection(name="Lab4Collection", embedding_function=embedding_func, client_settings={"sqlite3": sqlite3})
+            collection = chroma_client.create_collection(name="Lab4Collection", embedding_function=embedding_func)
             
             # Process PDF files
             for pdf_file in pdf_files:
@@ -93,6 +79,7 @@ def lab3():
                 
             # Store collection in session state to avoid re-creation
             st.session_state.Lab4_vectorDB = collection
+    
     # Initialize ChromaDB once if it hasn't been created yet
     if 'Lab4_vectorDB' not in st.session_state:
         # Assume 'uploaded_files' is a list of 7 uploaded PDF files
