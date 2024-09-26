@@ -19,10 +19,10 @@ st.set_page_config(
 )
 
 pages = [
-    st.Page(lab3, title="Lab 3"),  # Lab 3 is now the default
+    st.Page(lab4, title="Lab 4"),   # Lab 4 is now the default
+    st.Page(lab3, title="Lab 3"),  
     st.Page(lab2, title="Lab 2"),  
     st.Page(lab1, title="Lab 1"),
-    st.Page(lab4, title="Lab 4"),
     st.Page(lab5, title="Lab 5"),
     st.Page(lab6, title="Lab 6"),
     st.Page(lab7, title="Lab 7"),

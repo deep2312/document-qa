@@ -1,52 +1,38 @@
 import streamlit as st
 from openai import OpenAI
-import tiktoken  # Token counting
-import pdfplumber  # For reading PDFs
-
-__import__('pysqlite3')
+import tiktoken
+import pdfplumber
+import __main__
 import sys
+import os
+
+__main__.__dict__['__sqlite3_for_python__'] = __import__('pysqlite3')
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
 import chromadb
 from chromadb.utils import embedding_functions
 
 def lab4():
-    # Show title and description.
-    st.title("Simple Chatbot by Deep")
+    st.title("Course Information Chatbot")
 
     model_to_use = 'gpt-4o-mini'
 
-
-    # Initialize the OpenAI client if it doesn't exist
     if 'client' not in st.session_state:
         api_key = st.secrets["my_api_key"]
         st.session_state.client = OpenAI(api_key=api_key)
 
-    # Initialize chat history if it doesn't exist
     if 'messages' not in st.session_state:
-        st.session_state["messages"] = [{"role": "assistant", "content": "Hi! How can I help you today?"}]
-        st.session_state["awaiting_info_reply"] = False  # Tracks whether bot is awaiting a yes/no reply
-        st.session_state["last_question"] = None  # Stores the last user question
+        st.session_state.messages = [{"role": "assistant", "content": "Hi! How can I help you with course information today?"}]
 
-    # Define a function to calculate the token count using the tiktoken library
     def count_tokens(messages):
-        encoding = tiktoken.encoding_for_model(model_to_use)  # Get encoding for the selected model
-        tokens_per_message = sum([len(encoding.encode(message["content"])) for message in messages])
-        return tokens_per_message
+        encoding = tiktoken.encoding_for_model(model_to_use)
+        return sum([len(encoding.encode(message["content"])) for message in messages])
 
-    # Function to update chat history to fit within max_tokens
     def update_conversation_buffer(max_tokens):
-        # Start with the full message history
         full_history = st.session_state.messages
-        current_tokens = count_tokens(full_history)
-
-        # Trim the history until it fits within the token limit
-        while current_tokens > max_tokens and len(full_history) > 1:
-            # Remove the oldest message (pop the first element)
+        while count_tokens(full_history) > max_tokens and len(full_history) > 1:
             full_history.pop(0)
-            current_tokens = count_tokens(full_history)
-
-        st.session_state.messages = full_history  # Update the messages with the trimmed version
+        st.session_state.messages = full_history
 
     def convert_pdf_to_text(pdf_file):
         text = ""
@@ -54,141 +40,89 @@ def lab4():
             for page in pdf.pages:
                 text += page.extract_text()
         return text
-    
+
     def initialize_chromadb(pdf_files):
         if 'Lab4_vectorDB' not in st.session_state:
-            # Initialize ChromaDB and OpenAI embedding function
-            chroma_client = chromadb.Client()
-            embedding_func = embedding_functions.OpenAIEmbeddingFunction(api_key=st.secrets["my_api_key"],
-                                                                         model_name="text-embedding-ada-002")
+            persistent_dir = "chroma_db"
+            if not os.path.exists(persistent_dir):
+                os.makedirs(persistent_dir)
             
-            # Use pysqlite3 in ChromaDB
-            collection = chroma_client.create_collection(name="Lab4Collection", embedding_function=embedding_func)
+            chroma_client = chromadb.PersistentClient(path=persistent_dir)
+            embedding_func = embedding_functions.OpenAIEmbeddingFunction(
+                api_key=st.secrets["my_api_key"],
+                model_name="text-embedding-ada-002"
+            )
             
-            # Process PDF files
+            try:
+                collection = chroma_client.get_or_create_collection(name="Lab4Collection", embedding_function=embedding_func)
+            except Exception as e:
+                st.error(f"Error creating/getting collection: {e}")
+                return None
+            
             for pdf_file in pdf_files:
                 text = convert_pdf_to_text(pdf_file)
                 metadata = {"filename": pdf_file.name}
-                
-                # Add document to ChromaDB collection with embedding
                 collection.add(
                     documents=[text],
                     metadatas=[metadata],
-                    ids=[pdf_file.name]  # Using filename as ID
+                    ids=[pdf_file.name]
                 )
-                
-            # Store collection in session state to avoid re-creation
+            
             st.session_state.Lab4_vectorDB = collection
+        return st.session_state.Lab4_vectorDB
+
+    uploaded_files = st.sidebar.file_uploader("Upload PDF files", accept_multiple_files=True, type=["pdf"])
     
-    # Initialize ChromaDB once if it hasn't been created yet
-    if 'Lab4_vectorDB' not in st.session_state:
-        # Assume 'uploaded_files' is a list of 7 uploaded PDF files
-        uploaded_files = st.sidebar.file_uploader("Upload PDF files", accept_multiple_files=True, type=["pdf"])
-
-        if len(uploaded_files) == 7:
-            st.sidebar.write("Creating ChromaDB with the uploaded PDFs...")
-            initialize_chromadb(uploaded_files)
+    if len(uploaded_files) == 7:
+        st.sidebar.write("Creating ChromaDB with the uploaded PDFs...")
+        collection = initialize_chromadb(uploaded_files)
+        if collection:
+            st.sidebar.success("ChromaDB initialized with 7 PDF files.")
         else:
-            st.sidebar.warning("Please upload exactly 7 PDF files to proceed.")
+            st.sidebar.error("Failed to initialize ChromaDB.")
+            return
+    else:
+        st.sidebar.warning("Please upload exactly 7 PDF files to proceed.")
+        return
 
-    # Display all the messages in the chat history
+    # Rest of your code (chat interface, etc.)
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Handle user input
-    if prompt := st.chat_input("What would you like to ask?"):
-        if st.session_state["awaiting_info_reply"]:
-            # Handle the yes/no response for more info
-            if prompt.lower() == 'yes':
-                # Retrieve the last question to generate more information
-                last_question = st.session_state["last_question"]
-                if last_question:
-                    # Send the same question but request "more info"
-                    question = f"Can you provide more details about: {last_question}"
-                    additional_info_prompt = f"{question}. Explain in extremely simple terms such that even a 10 year old can understand."
-                    st.session_state.messages.append({"role": "user", "content": additional_info_prompt})
+    if prompt := st.chat_input("What would you like to know about the course?"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-                    with st.chat_message("user"):
-                        st.markdown(question)
-
-                    # Call OpenAI API to get the detailed answer
-                    client = st.session_state.client
-                    response = client.chat.completions.create(
-                        model=model_to_use,
-                        messages=st.session_state.messages
-                    )
-
-                    # Extract the response content properly
-                    reply_content = response.choices[0].message.content
-
-                    # Display assistant response in chat message container
-                    st.session_state.messages.append({"role": "assistant", "content": reply_content})
-
-                    with st.chat_message("assistant"):
-                        st.markdown(reply_content)
-
-                    # Ask if they want more info again
-                    follow_up = "DO YOU WANT MORE INFO?"
-                    st.session_state.messages.append({"role": "assistant", "content": follow_up})
-                    st.session_state["awaiting_info_reply"] = True
-
-                    with st.chat_message("assistant"):
-                        st.markdown(follow_up)
-
-            elif prompt.lower() == 'no':
-                # Reset and ask for a new question
-                new_question_prompt = "What question can I help you with next?"
-                st.session_state.messages.append({"role": "assistant", "content": new_question_prompt})
-                st.session_state["awaiting_info_reply"] = False
-
-                with st.chat_message("assistant"):
-                    st.markdown(new_question_prompt)
-            else:
-                # If the response isn't clear, ask again
-                clarification = "Please answer with 'yes' or 'no'. DO YOU WANT MORE INFO?"
-                st.session_state.messages.append({"role": "assistant", "content": clarification})
-
-                with st.chat_message("assistant"):
-                    st.markdown(clarification)
-        
-        else:
-            # Normal question flow
-            simplify = f"explain in simple terms"
-            st.session_state.messages.append({"role": "user", "content": f"{prompt} Use simple, easy to understand and non technical terms to explain."})
-
-            with st.chat_message("user"):
-                st.markdown(prompt)
-
-            # Define your max tokens limit
-            max_tokens = 512  # For example, set it to 512 tokens
-
-            # Update conversation buffer to fit within max_tokens
-            update_conversation_buffer(max_tokens)
-
-            # Send to OpenAI API and get the response
-            client = st.session_state.client
-            response = client.chat.completions.create(
-                model=model_to_use,
-                messages=st.session_state.messages
+        # Query ChromaDB
+        try:
+            results = st.session_state.Lab4_vectorDB.query(
+                query_texts=[prompt],
+                n_results=2
             )
+            context = "\n".join(results['documents'][0])
+        except Exception as e:
+            st.error(f"Error querying ChromaDB: {e}")
+            context = "Unable to retrieve context from the database."
 
-            # Extract the response content properly
-            reply_content = response.choices[0].message.content
+        system_message = """You are a helpful course assistant. Use the provided context to answer questions about the course. 
+        If the information is not in the context, say you don't have that information. Keep your answers concise and relevant."""
+        
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": f"Context: {context}\n\nQuestion: {prompt}"}
+        ]
 
-            # Display assistant response in chat message container
-            st.session_state.messages.append({"role": "assistant", "content": reply_content})
+        response = st.session_state.client.chat.completions.create(
+            model=model_to_use,
+            messages=messages
+        )
 
-            with st.chat_message("assistant"):
-                st.markdown(reply_content)
+        reply_content = response.choices[0].message.content
 
-            # Store the last user question for follow-up in case they ask for more info
-            st.session_state["last_question"] = prompt
+        st.session_state.messages.append({"role": "assistant", "content": reply_content})
+        with st.chat_message("assistant"):
+            st.markdown(reply_content)
 
-            # Ask if they want more info
-            follow_up = "DO YOU WANT MORE INFO?"
-            st.session_state.messages.append({"role": "assistant", "content": follow_up})
-            st.session_state["awaiting_info_reply"] = True
-
-            with st.chat_message("assistant"):
-                st.markdown(follow_up)
+        update_conversation_buffer(512)
